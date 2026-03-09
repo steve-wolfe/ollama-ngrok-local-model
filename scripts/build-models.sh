@@ -1,7 +1,13 @@
 #!/bin/bash
 set -e
 
-MODELFILES_DIR="/modelfiles"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# In Docker the Dockerfile sets /modelfiles; on host use project modelfiles/
+if [ -d "/modelfiles" ]; then
+  MODELFILES_DIR="${MODELFILES_DIR:-/modelfiles}"
+else
+  MODELFILES_DIR="${MODELFILES_DIR:-$SCRIPT_DIR/../modelfiles}"
+fi
 
 # Optional filter: comma-separated names. INCLUDE = whitelist (only these); EXCLUDE = blacklist (skip these).
 normalize_list() { echo "$1" | tr ',' '\n' | tr -d '[:space:]' | grep -v '^$'; }
@@ -17,19 +23,22 @@ should_build() {
   in_include "$1" && ! in_exclude "$1"
 }
 
-echo "Starting ollama server for model creation..."
-ollama serve &
-SERVER_PID=$!
-
-echo "Waiting for ollama to be ready..."
-until ollama list > /dev/null 2>&1; do
-  sleep 1
-done
+WE_STARTED_SERVER=0
+if ! ollama list > /dev/null 2>&1; then
+  echo "Starting ollama server for model creation..."
+  ollama serve &
+  SERVER_PID=$!
+  WE_STARTED_SERVER=1
+  echo "Waiting for ollama to be ready..."
+  until ollama list > /dev/null 2>&1; do
+    sleep 1
+  done
+fi
 echo "Ollama ready."
 
 if [ -z "$(ls -A $MODELFILES_DIR 2>/dev/null)" ]; then
   echo "No modelfiles found in $MODELFILES_DIR, skipping."
-  kill $SERVER_PID
+  [ "$WE_STARTED_SERVER" = 1 ] && kill $SERVER_PID 2>/dev/null || true
   exit 0
 fi
 
@@ -49,8 +58,12 @@ for modelfile in "$MODELFILES_DIR"/*; do
     continue
   fi
 
-  echo "[$model_name] Pulling base model: $base_model"
-  ollama pull "$base_model"
+  if ollama show "$base_model" >/dev/null 2>&1; then
+    echo "[$model_name] Base model $base_model already present, skipping pull."
+  else
+    echo "[$model_name] Pulling base model: $base_model"
+    ollama pull "$base_model"
+  fi
 
   echo "[$model_name] Creating custom model..."
   ollama create "$model_name" -f "$modelfile"
@@ -59,5 +72,4 @@ for modelfile in "$MODELFILES_DIR"/*; do
 done
 
 echo "All models created successfully."
-kill $SERVER_PID
-wait $SERVER_PID 2>/dev/null || true
+[ "$WE_STARTED_SERVER" = 1 ] && { kill $SERVER_PID 2>/dev/null; wait $SERVER_PID 2>/dev/null || true; }

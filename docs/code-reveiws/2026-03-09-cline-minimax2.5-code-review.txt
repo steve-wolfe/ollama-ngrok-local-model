@@ -1,0 +1,161 @@
+# Code Review: local_model
+
+Date: 2026-03-09
+Reviewer: Cline
+
+## Scope Reviewed
+
+- Core runtime/proxy: `proxy/server.js`, `proxy/Dockerfile`, `proxy/package.json`
+- Deployment/runtime config: `docker-compose.yml`, `docker-compose.wOllama.yml`, `Dockerfile`
+- Model/config automation: `scripts/build-models.sh`, `scripts/ollama-create-aliases.sh`, `scripts/model-map.json`, `modelfiles/o1`
+- Documentation: `README.md`, `docs/setup/SETUP.md`, `docs/notes/NATIVE-OLLAMA-MAC.md`, `docs/notes/NOTES.md`
+- Repo hygiene: `.gitignore`
+
+---
+
+## Executive Summary
+
+This project has a clear and practical architecture for exposing local Ollama models to Cursor-compatible clients, with useful request normalization in the proxy and good operational scripts for model creation. The most significant issues are around security posture (public exposure without explicit auth controls) and documentation drift (some docs reference files/flows that no longer match the repository state).
+
+Overall assessment: **Solid foundation, but needs security hardening and doc consistency cleanup before broader use.**
+
+---
+
+## Strengths
+
+1. **Thoughtful protocol adaptation layer**
+   - `proxy/server.js` handles Cursor/OpenAI Responses payload normalization (`input -> messages`, content flattening, tool normalization) and bridges common compatibility gaps.
+
+2. **Good streaming resilience mechanisms**
+   - Includes stream keepalive behavior and optional non-streaming fallback to mitigate tunnel/client disconnect issues.
+
+3. **Practical model bootstrap workflow**
+   - `scripts/build-models.sh` supports include/exclude filters and first-run model bootstrapping into volume-backed storage.
+
+4. **Clear model alias strategy**
+   - `scripts/model-map.json` + alias generation script is pragmatic for clients with model-name allowlists.
+
+5. **Readable and maintainable code style**
+   - Proxy code is modularized into focused helper functions and has useful runtime logs.
+
+---
+
+## Findings and Recommendations
+
+### 1) [HIGH] Public exposure security/auth controls are not explicit enough
+
+**Evidence**
+- `docker-compose.yml` exposes proxy (`8080`) and ngrok tunnels public traffic.
+- `docker-compose.wOllama.yml` sets `OLLAMA_ORIGINS=*` and tunnels directly to Ollama.
+- No enforced API key/auth middleware is visible in `proxy/server.js`.
+
+**Risk**
+- Public endpoint could be abused for unauthorized inference usage/cost/resource exhaustion.
+
+**Recommendation**
+- Add a required shared secret/API key check in proxy (e.g., bearer token via env var).
+- Restrict CORS origins where feasible instead of wildcard.
+- Document security defaults prominently (including rate-limit guidance).
+
+---
+
+### 2) [HIGH] Documentation drift and contradictory setup paths
+
+**Evidence**
+- `README.md` states Quick Start path with “ngrok straight to Ollama (no proxy)”, while `docker-compose.yml` currently routes through `proxy`.
+- `SETUP.md` references `proxy/model-map.json` and an `ollama` service in `docker-compose.yml`, but current files place `model-map.json` at repo root and Ollama service in `docker-compose.wOllama.yml`.
+- `README.md`/`NATIVE-OLLAMA-MAC.md` reference `scripts/run-ollama-native.sh`, `scripts/ollama-env.sh`, and root `Dockerfile` references `scripts/entrypoint.sh`, but these files are not present in current `scripts/` listing.
+
+**Risk**
+- New users may fail setup or follow stale instructions.
+
+**Recommendation**
+- Perform a docs/config synchronization pass:
+  - Align `README.md`, `SETUP.md`, and compose files with one current “blessed” flow.
+  - Either restore missing scripts or remove/update references.
+  - Add a quick verification checklist after setup commands.
+
+---
+
+### 3) [MEDIUM] Missing referenced scripts may break container/native workflows
+
+**Evidence**
+- Root `Dockerfile` copies `/scripts/entrypoint.sh`, but file is not present in listed `scripts/` directory.
+- Docs reference `run-ollama-native.sh` and `ollama-env.sh`, also not present.
+
+**Risk**
+- Docker build/runtime failures or incomplete native workflow.
+
+**Recommendation**
+- Add the missing scripts, or update Dockerfile/docs to remove dependence on them.
+- Add a CI check that validates all doc-referenced scripts/files exist.
+
+---
+
+### 4) [MEDIUM] Proxy request passthrough behavior may forward sensitive/irrelevant headers
+
+**Evidence**
+- In passthrough branch, upstream request reuses incoming `req.headers` wholesale.
+
+**Risk**
+- Header leakage or unintended behavior between client and upstream.
+
+**Recommendation**
+- Introduce explicit header allowlist for upstream forwarding (e.g., `content-type`, `authorization` if intended, trace headers as needed).
+
+---
+
+### 5) [MEDIUM] Logging may expose request payload content
+
+**Evidence**
+- Proxy logs request body previews for completions endpoints.
+
+**Risk**
+- Prompts/tool args may include sensitive data in logs.
+
+**Recommendation**
+- Gate verbose body logging behind env flag (default off in non-debug runs).
+- Consider redaction strategy for known sensitive fields.
+
+---
+
+### 6) [LOW] Runtime package metadata is minimal
+
+**Evidence**
+- `proxy/package.json` has no dependencies/scripts metadata beyond `main`.
+
+**Risk**
+- Lower operational clarity for maintainers and tooling.
+
+**Recommendation**
+- Add standard scripts (`start`, optional `dev`) and engines metadata.
+- Optionally add lint/test scaffolding for proxy behaviors.
+
+---
+
+## Additional Notes
+
+- `.gitignore` currently ignores `.env` and `ollama_data`, which is good baseline hygiene.
+- `build-models.sh` is generally robust; include/exclude filter support is a notable positive.
+- `model-map.json` includes `gpt-4 -> qwen3-coder-next:latest`; ensure this base exists in target Ollama environment to avoid runtime model-not-found errors.
+
+---
+
+## Suggested Prioritized Action Plan
+
+1. **Security hardening (immediate)**
+   - Add proxy auth token enforcement and restrict origins.
+2. **Docs/source-of-truth cleanup (immediate)**
+   - Reconcile all setup docs with current compose topology and script inventory.
+3. **Missing-file reconciliation (short-term)**
+   - Restore or remove `entrypoint.sh`, `run-ollama-native.sh`, `ollama-env.sh` references.
+4. **Proxy hardening (short-term)**
+   - Header allowlisting and log redaction/verbosity control.
+5. **Maintainability improvements (nice-to-have)**
+   - Add lightweight validation/CI checks for doc integrity and script existence.
+
+---
+
+## Final Verdict
+
+The project is technically promising and already contains valuable compatibility logic for Cursor/Ollama interop. To make it production-safe and easier for others to use reliably, prioritize security defaults and documentation consistency.

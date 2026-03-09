@@ -1,0 +1,10 @@
+model_list:
+  - model_name: gpt-4o
+    litellm_params:
+      model: ollama/llama3.2-coder
+      api_base: http://localhost:11434
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: ollama/qwen2.5-coder-agent
+      api_base: http://localhost:11434
+  # add more to match your scripts/model-map.json

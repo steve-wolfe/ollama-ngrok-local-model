@@ -1,35 +1,23 @@
+# Proxy (normalizes Cursor request: input→messages, content) + ngrok. Ollama on host or alias models.
 services:
-  ollama:
+  proxy:
     build:
-      context: .
+      context: ./proxy
       dockerfile: Dockerfile
-    container_name: ollama
+    container_name: ollama-proxy
     ports:
-      - "11434:11434"
-    deploy:
-      resources:
-        reservations:
-          memory: 60g
-    volumes:
-      - ollama_data:/root/.ollama
+      - "8080:8080"
     environment:
-      - OLLAMA_ORIGINS=*
-      - OLLAMA_HOST=0.0.0.0
-      - OLLAMA_NUM_CTX=65536
-      # Optional: which modelfiles to build on first run. Unset = build all.
-      # - OLLAMA_MODELFILES_INCLUDE=devstral-agent,qwen2.5-coder-agent   # whitelist: only these
-      # - OLLAMA_MODELFILES_EXCLUDE=deepseek-r1-agent,llama3.2-coder     # blacklist: all except these
+      - OLLAMA_UPSTREAM=http://host.docker.internal:11434
+      - PORT=8080
     restart: unless-stopped
 
   ngrok:
     image: ngrok/ngrok:latest
     container_name: ngrok
-    command: http ollama:11434
+    command: http proxy:8080
     env_file:
       - .env
     depends_on:
-      - ollama
+      - proxy
     restart: unless-stopped
-
-volumes:
-  ollama_data:

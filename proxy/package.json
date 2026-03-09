@@ -1,0 +1,6 @@
+{
+  "name": "ollama-normalize-proxy",
+  "version": "1.0.0",
+  "description": "Minimal proxy: normalizes Cursor request body (input→messages, content) then forwards to Ollama",
+  "main": "server.js"
+}

@@ -1,0 +1,7 @@
+{
+  "gpt-4o": "llama3.2-coder:latest",
+  "o1": "devstral-agent:latest",
+  "gpt-4-turbo": "deepseek-r1-agent:latest",
+  "gpt-4o-mini": "qwen2.5-coder-agent:latest",
+  "gpt-4": "qwen3-coder-next:latest"
+}
